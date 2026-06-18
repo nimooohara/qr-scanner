@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>QRスキャン</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",sans-serif;background:#111;color:#fff;display:flex;flex-direction:column}
+#wrap{position:relative;flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#000}
+video{width:100%;height:100%;object-fit:cover}
+#overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+#frame{width:66%;max-width:300px;aspect-ratio:1;border:3px solid rgba(255,255,255,.9);border-radius:16px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
+#msg{margin-top:18px;font-size:14px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,.8);text-align:center;padding:0 20px}
+#target{position:absolute;top:14px;left:0;right:0;text-align:center;font-size:13px;font-weight:700;color:#9ecbff;text-shadow:0 1px 4px rgba(0,0,0,.8)}
+#bar{padding:16px;display:flex;flex-direction:column;gap:10px;background:#1c1c1e}
+#result{font-size:14px;color:#34c759;text-align:center;min-height:20px;font-weight:700}
+#manual{width:100%;padding:12px;border-radius:10px;border:1px solid #555;background:#2c2c2e;color:#fff;font-size:16px;font-family:inherit;outline:none}
+#manual::placeholder{color:#888}
+#manual:focus{border-color:#1a73e8}
+.row{display:flex;gap:10px}
+button{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer}
+#useBtn{background:#1a73e8;color:#fff}
+#againBtn{background:#3a3a3c;color:#fff}
+#closeBtn{background:#3a3a3c;color:#fff}
+#hint{font-size:11px;color:#888;text-align:center}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <video id="vid" playsinline muted autoplay></video>
+  <div id="overlay">
+    <div id="target"></div>
+    <div id="frame"></div>
+    <div id="msg">QRコードを枠内に合わせてください</div>
+  </div>
+</div>
+<div id="bar">
+  <div id="result"></div>
+  <input id="manual" type="text" inputmode="numeric" placeholder="読み取れない場合は直接入力">
+  <div class="row">
+    <button id="useBtn">この値を使う</button>
+    <button id="againBtn">もう一度</button>
+  </div>
+  <div class="row">
+    <button id="closeBtn">閉じる</button>
+  </div>
+  <div id="hint">読み取り後この画面は自動で閉じ、元のアプリに値が入ります</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script>
+(function(){
+  var vid=document.getElementById('vid');
+  var manual=document.getElementById('manual');
+  var result=document.getElementById('result');
+  var msg=document.getElementById('msg');
+  var stream=null, raf=null, locked=false;
+
+  // 何を読み取るか（SN / ラック番号）を親から ?label= で受け取り表示
+  var params=new URLSearchParams(location.search);
+  var label=params.get('label')||'';
+  if(label) document.getElementById('target').textContent='スキャン対象：'+label;
+
+  function send(val){
+    val=String(val||'').trim();
+    if(!val){ alert('値が空です'); return; }
+    if(window.opener){
+      try{ window.opener.postMessage({type:'QR_SCAN_RESULT', value:val}, '*'); }catch(e){}
+    }
+    msg.textContent='✓ 送信しました';
+    setTimeout(function(){ try{window.close();}catch(e){} }, 250);
+  }
+
+  document.getElementById('useBtn').addEventListener('click',function(){ send(manual.value); });
+  document.getElementById('closeBtn').addEventListener('click',function(){
+    if(window.opener){ try{ window.opener.postMessage({type:'QR_SCAN_CANCEL'}, '*'); }catch(e){} }
+    try{window.close();}catch(e){}
+  });
+  document.getElementById('againBtn').addEventListener('click',function(){
+    locked=false; result.textContent=''; manual.value=''; msg.textContent='QRコードを枠内に合わせてください';
+    if(!stream) startCamera();
+  });
+
+  function startCamera(){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof jsQR==='undefined'){
+      msg.textContent='カメラを使用できません。直接入力してください。';
+      vid.style.display='none';
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}})
+      .then(function(s){
+        stream=s; vid.srcObject=s; vid.play();
+        var cv=document.createElement('canvas'), ctx=cv.getContext('2d');
+        (function tick(){
+          if(!stream) return;
+          if(!locked && vid.readyState>=2 && vid.videoWidth>0){
+            cv.width=vid.videoWidth; cv.height=vid.videoHeight;
+            ctx.drawImage(vid,0,0);
+            var img=ctx.getImageData(0,0,cv.width,cv.height);
+            var code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
+            if(code && code.data){
+              locked=true;
+              var val=String(code.data).trim();
+              result.textContent='読み取り：'+val;
+              manual.value=val;
+              msg.textContent='✓ 「この値を使う」を押すと送信します';
+              if('vibrate' in navigator){ try{navigator.vibrate(80);}catch(e){} }
+              // 自動送信したい場合は次行を有効化： send(val);
+              return;
+            }
+          }
+          raf=requestAnimationFrame(tick);
+        })();
+      })
+      .catch(function(){
+        msg.textContent='カメラの使用が許可されませんでした。直接入力してください。';
+        vid.style.display='none';
+      });
+  }
+  startCamera();
+})();
+</script>
+</body>
+</html>
