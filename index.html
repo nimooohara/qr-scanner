@@ -61,7 +61,7 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
 <script src="zxing.js"></script>
 <script>
 (function(){
-  var SCANNER_VERSION='2026.07.16-1';
+  var SCANNER_VERSION='2026.07.16-2';
   var PROTOCOL_VERSION='2';
   var vid=document.getElementById('vid');
   var manual=document.getElementById('manual');
@@ -77,19 +77,38 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
   var requestedProtocol=params.get('protocol');
   var legacyMode=!requestedProtocol; /* 旧GAS画面はprotocolを渡さない */
   var expectedProtocol=requestedProtocol||PROTOCOL_VERSION;
+  var returnUrl=params.get('returnUrl')||'';
+  var returnTarget=params.get('target')||'';
+  var returnToken=params.get('returnToken')||'';
+  var CAMERA_RESUME_KEY='returnsScannerCameraResume_v1',shouldAutoResume=false;
+  try{var cameraResumeAt=Number(sessionStorage.getItem(CAMERA_RESUME_KEY)||0);sessionStorage.removeItem(CAMERA_RESUME_KEY);shouldAutoResume=cameraResumeAt>0&&Date.now()-cameraResumeAt<15000;}catch(e){}
   if(label) document.getElementById('target').textContent='スキャン対象：'+label+' ／ Ver '+SCANNER_VERSION;
 
   function showMsg(text,isErr){ msg.style.display='block'; msg.textContent=text; msg.style.color=isErr?'#ff8a80':'#fff'; }
 
   function stopReader(){ if(reader){ try{reader.reset();}catch(e){} } }
 
+  function returnToApp(val){
+    if(!returnUrl||!returnToken||!returnTarget)return false;
+    try{
+      var u=new URL(returnUrl);
+      if(u.protocol!=='https:'||['script.google.com','script.googleusercontent.com'].indexOf(u.hostname)<0)return false;
+      u.searchParams.set('scanValue',String(val||''));
+      u.searchParams.set('scanTarget',returnTarget);
+      u.searchParams.set('scanRack',label==='ラック番号'?'1':'0');
+      u.searchParams.set('scanToken',returnToken);
+      clearTimeout(sendTimer);showMsg('元のアプリとの接続が切れたため、スキャン結果を持ってアプリへ戻ります…');
+      setTimeout(function(){location.replace(u.toString());},250);return true;
+    }catch(e){return false;}
+  }
+
   function postPending(){
     if(!pendingValue)return;
-    if(!window.opener){showMsg('元のアプリとの接続が切れています。元のアプリへ戻り、もう一度スキャンを開いてください。',true);return;}
+    if(!window.opener){if(!returnToApp(pendingValue))showMsg('元のアプリとの接続が切れています。元のアプリへ戻り、もう一度スキャンを開いてください。',true);return;}
     sendAttempts++;
     try{window.opener.postMessage({type:'QR_SCAN_RESULT',value:pendingValue,protocol:PROTOCOL_VERSION,scannerVersion:SCANNER_VERSION},'*');}catch(e){}
-    if(sendAttempts<20)sendTimer=setTimeout(postPending,300);
-    else showMsg('元のアプリから受信確認が届きません。画面を閉じず、通信状態を確認して「この値を使う」をもう一度押してください。',true);
+    if(sendAttempts<8)sendTimer=setTimeout(postPending,300);
+    else if(!returnToApp(pendingValue))showMsg('元のアプリから受信確認が届きません。画面を閉じず、通信状態を確認して「この値を使う」をもう一度押してください。',true);
   }
 
   function send(val){
@@ -134,7 +153,7 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
     document.getElementById('startBtn').disabled=true;
     document.getElementById('useBtn').disabled=true;
     showMsg('スキャナのバージョンが元のアプリと一致しません。GitHub Pagesのファイルを更新してください。',true);
-  }
+  }else if(shouldAutoResume){setTimeout(function(){startCamera(true);},350);}
 
   function buildReader(){
     var hints=new Map();
@@ -168,7 +187,8 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
     return 'コード';
   }
 
-  function startCamera(){
+  function startCamera(autoResume){
+    if(autoResume!==true){try{sessionStorage.setItem(CAMERA_RESUME_KEY,String(Date.now()));}catch(e){}}
     startBox.style.display='none';
     if(typeof ZXing==='undefined'){
       showMsg('読み取りライブラリ(zxing.js)を読み込めませんでした。zxing.js が index.html と同じ場所にあるか確認してください。直接入力は使えます。', true);
@@ -188,9 +208,12 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
         /* err は読取待ちの間 NotFoundException が毎フレーム来るので無視 */
       }
     ).then(function(){
+      try{sessionStorage.removeItem(CAMERA_RESUME_KEY);}catch(e){}
       frame.style.display='block';
       showMsg('QR / バーコードを枠内に合わせてください');
     }).catch(function(e){
+      try{sessionStorage.removeItem(CAMERA_RESUME_KEY);}catch(ex){}
+      startBox.style.display='flex';
       var name=e&&e.name?e.name:'';
       var t='カメラを起動できませんでした。';
       if(name==='NotAllowedError'||name==='SecurityError') t='カメラの使用が「許可されませんでした」。アドレスバー左の「ぁ(AA)」→ Webサイトの設定 → カメラ を「許可」にして再読み込みしてください。';
