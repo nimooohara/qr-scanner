@@ -61,6 +61,8 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
 <script src="zxing.js"></script>
 <script>
 (function(){
+  var SCANNER_VERSION='2026.07.16-1';
+  var PROTOCOL_VERSION='2';
   var vid=document.getElementById('vid');
   var manual=document.getElementById('manual');
   var resultEl=document.getElementById('result');
@@ -68,23 +70,53 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
   var msg=document.getElementById('msg');
   var frame=document.getElementById('frame');
   var startBox=document.getElementById('start');
-  var reader=null, locked=false;
+  var reader=null, locked=false, sendTimer=null, sendAttempts=0, pendingValue='';
 
   var params=new URLSearchParams(location.search);
   var label=params.get('label')||'';
-  if(label) document.getElementById('target').textContent='スキャン対象：'+label;
+  var requestedProtocol=params.get('protocol');
+  var legacyMode=!requestedProtocol; /* 旧GAS画面はprotocolを渡さない */
+  var expectedProtocol=requestedProtocol||PROTOCOL_VERSION;
+  if(label) document.getElementById('target').textContent='スキャン対象：'+label+' ／ Ver '+SCANNER_VERSION;
 
   function showMsg(text,isErr){ msg.style.display='block'; msg.textContent=text; msg.style.color=isErr?'#ff8a80':'#fff'; }
 
   function stopReader(){ if(reader){ try{reader.reset();}catch(e){} } }
 
+  function postPending(){
+    if(!pendingValue)return;
+    if(!window.opener){showMsg('元のアプリとの接続が切れています。元のアプリへ戻り、もう一度スキャンを開いてください。',true);return;}
+    sendAttempts++;
+    try{window.opener.postMessage({type:'QR_SCAN_RESULT',value:pendingValue,protocol:PROTOCOL_VERSION,scannerVersion:SCANNER_VERSION},'*');}catch(e){}
+    if(sendAttempts<20)sendTimer=setTimeout(postPending,300);
+    else showMsg('元のアプリから受信確認が届きません。画面を閉じず、通信状態を確認して「この値を使う」をもう一度押してください。',true);
+  }
+
   function send(val){
     val=String(val||'').trim();
     if(!val){ alert('値が空です'); return; }
-    if(window.opener){ try{ window.opener.postMessage({type:'QR_SCAN_RESULT', value:val}, '*'); }catch(e){} }
-    showMsg('✓ 送信しました');
-    setTimeout(function(){ try{window.close();}catch(e){} }, 250);
+    if(expectedProtocol!==PROTOCOL_VERSION){showMsg('スキャナのバージョンが元のアプリと一致しません。GitHub Pagesのファイルを更新してください。',true);return;}
+    if(legacyMode){
+      stopReader();
+      if(!window.opener){showMsg('元のアプリとの接続が切れています。元のアプリへ戻り、もう一度スキャンを開いてください。',true);return;}
+      try{window.opener.postMessage({type:'QR_SCAN_RESULT',value:val},'*');}catch(e){}
+      showMsg('✓ 送信しました（旧画面互換モード）');
+      setTimeout(function(){try{window.close();}catch(e){}},500);
+      return;
+    }
+    stopReader();pendingValue=val;sendAttempts=0;clearTimeout(sendTimer);
+    showMsg('元のアプリへ送信中…');postPending();
   }
+
+  window.addEventListener('message',function(e){
+    if(e.source!==window.opener||!e.data)return;
+    if(e.data.type==='QR_SCAN_ACK'&&String(e.data.protocol||'')===PROTOCOL_VERSION&&String(e.data.value||'')===pendingValue){
+      clearTimeout(sendTimer);pendingValue='';showMsg('✓ 元のアプリが受信しました');
+      setTimeout(function(){try{window.close();}catch(ex){}},350);
+    }else if(e.data.type==='QR_SCAN_REJECT'){
+      clearTimeout(sendTimer);pendingValue='';showMsg(e.data.reason||'元のアプリがスキャン結果を受け付けませんでした。',true);
+    }
+  });
 
   document.getElementById('useBtn').addEventListener('click',function(){ send(manual.value); });
   document.getElementById('closeBtn').addEventListener('click',function(){
@@ -97,6 +129,12 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
     startCamera();
   });
   document.getElementById('startBtn').addEventListener('click', startCamera);
+
+  if(expectedProtocol!==PROTOCOL_VERSION){
+    document.getElementById('startBtn').disabled=true;
+    document.getElementById('useBtn').disabled=true;
+    showMsg('スキャナのバージョンが元のアプリと一致しません。GitHub Pagesのファイルを更新してください。',true);
+  }
 
   function buildReader(){
     var hints=new Map();
