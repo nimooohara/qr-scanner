@@ -55,13 +55,13 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
   <div class="row">
     <button class="act" id="closeBtn">閉じる</button>
   </div>
-  <div id="hint">読み取り後この画面は自動で閉じ、元のアプリに値が入ります</div>
+  <div id="hint">読み取り後、元のアプリに戻って値が入ります</div>
 </div>
 
 <script src="zxing.js"></script>
 <script>
 (function(){
-  var SCANNER_VERSION='2026.07.16-2';
+  var SCANNER_VERSION='2026.07.16-3';
   var PROTOCOL_VERSION='2';
   var vid=document.getElementById('vid');
   var manual=document.getElementById('manual');
@@ -97,7 +97,7 @@ button.act{flex:1;padding:14px;border:none;border-radius:11px;font-size:15px;fon
       u.searchParams.set('scanTarget',returnTarget);
       u.searchParams.set('scanRack',label==='ラック番号'?'1':'0');
       u.searchParams.set('scanToken',returnToken);
-      clearTimeout(sendTimer);showMsg('元のアプリとの接続が切れたため、スキャン結果を持ってアプリへ戻ります…');
+      clearTimeout(sendTimer);showMsg('読み取り結果を反映しています。元のアプリへ戻ります…');
       setTimeout(function(){location.replace(u.toString());},250);return true;
     }catch(e){return false;}
   }
